@@ -14,6 +14,7 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <exec_depend>ros2_control_stark</exec_depend>
   <exec_depend>ros2_control_demo_example_1</exec_depend>
   <exec_depend>ros2_control_demo_example_2</exec_depend>
   <exec_depend>ros2_control_demo_example_3</exec_depend>

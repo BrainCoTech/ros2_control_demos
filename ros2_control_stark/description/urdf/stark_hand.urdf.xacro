@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!-- Revolute-Revolute Manipulator -->
+<!--
+Copied and modified from ROS1 example -
+https://github.com/ros-simulation/gazebo_ros_demos/blob/kinetic-devel/rrbot_description/urdf/rrbot.xacro
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="stark_hand">
+  <xacro:arg name="prefix" default="" />
+
+  <!-- Import RRBot macro -->
+  <xacro:include filename="$(find ros2_control_demo_description)/stark_hand/urdf/stark_hand_description.urdf.xacro" />
+
+  <!-- Import Rviz colors -->
+  <xacro:include filename="$(find ros2_control_demo_description)/stark_hand/urdf/stark_hand.materials.xacro" />
+
+  <!-- Import RRBot ros2_control description -->
+  <xacro:include filename="$(find ros2_control_stark)/ros2_control/stark_hand.ros2_control.xacro" />
+
+  <!-- Used for fixing robot -->
+  <link name="world"/>
+
+  <xacro:stark_hand parent="world" prefix="$(arg prefix)">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </xacro:stark_hand>
+
+  <xacro:ros2_control_stark
+    name="Stark" prefix="$(arg prefix)" />
+
+</robot>

@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- 定义 ros2_control_stark 宏 -->
+  <xacro:macro name="ros2_control_stark" params="name prefix">
+
+    <ros2_control name="${name}" type="system">
+      <hardware>
+        <plugin>ros2_control_stark/StarkHardware</plugin>
+        <param name="example_param_hw_start_duration_sec">0</param>
+        <param name="example_param_hw_stop_duration_sec">3.0</param>
+        <param name="example_param_hw_slowdown">100</param>
+      </hardware>
+
+      <!-- 定义 command block -->
+      <xacro:macro name="cmd_block">
+        <command_interface name="position">
+          <param name="min">-1</param>
+          <param name="max">1</param>
+        </command_interface>
+        <command_interface name="velocity">
+          <param name="min">-1</param>
+          <param name="max">1</param>
+        </command_interface>
+        <command_interface name="effort">
+          <param name="min">-1</param>
+          <param name="max">1</param>
+        </command_interface>
+      </xacro:macro>
+
+      <!-- 定义 state block -->
+      <xacro:macro name="state_block">
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+        <!-- <state_interface name="state"/> -->
+      </xacro:macro>
+
+      <!-- 定义关节宏 -->
+      <xacro:macro name="stark_joint" params="joint_name">
+        <joint name="${prefix}${joint_name}">
+          <xacro:cmd_block/>
+          <xacro:state_block/>
+        </joint>
+      </xacro:macro>
+
+      <!-- 依次展开 6 个关节 -->
+      <xacro:stark_joint joint_name="thumb"/>
+      <xacro:stark_joint joint_name="thumb_aux"/>
+      <xacro:stark_joint joint_name="index"/>
+      <xacro:stark_joint joint_name="middle"/>
+      <xacro:stark_joint joint_name="ring"/>
+      <xacro:stark_joint joint_name="pinky"/>
+
+    </ros2_control>
+  </xacro:macro>
+
+</robot>

@@ -1,0 +1,6 @@
+log/
+build/
+install/
+dist/
+VERSION
+logs/

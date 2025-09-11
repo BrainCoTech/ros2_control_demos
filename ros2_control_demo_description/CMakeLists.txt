@@ -28,4 +28,9 @@ install(
   DESTINATION share/${PROJECT_NAME}/r6bot
 )
 
+install(
+  DIRECTORY stark_hand/urdf stark_hand/rviz
+  DESTINATION share/${PROJECT_NAME}/stark_hand
+)
+
 ament_package()
