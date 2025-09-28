@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="revo2_system_ros2_control" params="name prefix ctrl_mode_param2_time_ms:=10">
+
+    <ros2_control name="${name}" type="system">
+      <hardware>
+        <plugin>stark_ethercat_driver/EthercatDriver</plugin>
+        <param name="master_id">0</param>
+        <param name="control_frequency">1000</param>
+      </hardware>
+
+      <!-- TODO use gpio module -->
+      <!-- EtherCAT模块配置，支持运动时间参数 -->
+      <gpio name="${prefix}revo2_joints_system">
+        <ec_module name="Revo2_System">
+          <plugin>revo2_ethercat_plugins/Revo2JointsSystemSlave</plugin>
+          <param name="alias">0</param>
+          <param name="position">0</param>
+          <param name="ctrl_mode_param2_time_ms">${ctrl_mode_param2_time_ms}</param>  <!-- 位置+时间控制模式下的运动时间，单位ms, 1ms为以最快速度运动 -->
+          <param name="assign_activate">0x0000</param> <!-- DC同步配置 -->
+        </ec_module>
+      </gpio>
+      
+      <joint name="${prefix}thumb_flex_joint">
+        <command_interface name="position">
+          <param name="min">0.0</param>
+          <param name="max">1.03</param> <!-- 最大59°，约1.03弧度 -->
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+
+      <joint name="${prefix}thumb_abduct_joint">
+        <command_interface name="position">
+          <param name="min">0.0</param>
+          <param name="max">1.57</param> <!-- 最大90°，约1.57弧度 -->
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+
+      <joint name="${prefix}index_joint">
+        <command_interface name="position">
+          <param name="min">0.0</param>
+          <param name="max">1.41</param> <!-- 最大81°，约1.41弧度 -->
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+
+      <joint name="${prefix}middle_joint">
+        <command_interface name="position">
+          <param name="min">0.0</param>
+          <param name="max">1.41</param> <!-- 最大81°，约1.41弧度 -->
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+
+      <joint name="${prefix}ring_joint">
+        <command_interface name="position">
+          <param name="min">0.0</param>
+          <param name="max">1.41</param> <!-- 最大81°，约1.41弧度 -->
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+
+      <joint name="${prefix}pinky_joint">
+        <command_interface name="position">
+          <param name="min">0.0</param>
+          <param name="max">1.41</param> <!-- 最大81°，约1.41弧度 -->
+        </command_interface>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+
+    </ros2_control>
+
+  </xacro:macro>
+
+</robot>

@@ -1,0 +1,79 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz
+
+    # Load and configure controllers  
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    revo2_joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    # default NOT launch
+    revo2_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+# Joint State Broadcaster Configuration
+joint_state_broadcaster:
+  ros__parameters: {}
+
+# Configuration
+revo2_position_controller:
+  ros__parameters:
+    joints:
+      - thumb_flex_joint
+      - thumb_abduct_joint
+      - index_joint
+      - middle_joint
+      - ring_joint
+      - pinky_joint
+
+# Revo2 Joint Trajectory Controller Configuration
+revo2_joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - thumb_flex_joint
+      - thumb_abduct_joint  
+      - index_joint
+      - middle_joint
+      - ring_joint
+      - pinky_joint
+    
+    command_interfaces:
+      - position
+    
+    state_interfaces:
+      - position
+      - velocity
+    use_external_topic: true
+      
+    state_publish_rate: 100.0  # Hz
+    action_monitor_rate: 20.0   # Hz
+    
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: true
+    allow_nonzero_velocity_at_trajectory_end: false
+    
+    # constraints:
+    #   stopped_velocity_tolerance: 0.01  # rad/s
+    #   goal_time: 0.1  # seconds
+      
+    #   # 每个关节的约束 (位置范围 1-900)
+    #   thumb_flex_joint:
+    #     trajectory: 5.0    # 轨迹跟踪误差容忍度
+    #     goal: 2.0          # 目标位置误差容忍度
+    #   thumb_abduct_joint:
+    #     trajectory: 5.0
+    #     goal: 2.0
+    #   index_joint:
+    #     trajectory: 5.0
+    #     goal: 2.0
+    #   middle_joint:
+    #     trajectory: 5.0
+    #     goal: 2.0
+    #   ring_joint:
+    #     trajectory: 5.0
+    #     goal: 2.0
+    #   pinky_joint:
+    #     trajectory: 5.0
+    #     goal: 2.0
