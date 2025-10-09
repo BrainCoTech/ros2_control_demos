@@ -37,7 +37,7 @@ public:
 
 private:
   // 常量定义
-  static constexpr size_t NUM_FINGERS = 6;
+  static constexpr size_t NUM_FINGER_MOTORS = 6;
   static constexpr uint8_t SINGLE_MODE_POSITION_TIME = 1;    // 位置+时间控制
   static constexpr uint16_t MULTI_MODE_POSITION_TIME = 1;    // 多指：位置+时间控制
   static constexpr uint16_t CTRL_MODE_PARAM2_TIME_MS = 100;  // 默认运动时间
@@ -61,7 +61,7 @@ private:
   };
 
   // 关节名称映射
-  const std::array<std::string, NUM_FINGERS> joint_names_ = {
+  const std::array<std::string, NUM_FINGER_MOTORS> joint_names_ = {
     "thumb_flex_joint", "thumb_abduct_joint", "index_joint",
     "middle_joint",     "ring_joint",         "pinky_joint"};
 
@@ -87,24 +87,36 @@ private:
     int velocity_state;  // state_interface 中的速度索引
     int effort_state;    // state_interface 中的力矩索引
   };
-  std::array<JointInterface, NUM_FINGERS> joint_interfaces_;
+  std::array<JointInterface, NUM_FINGER_MOTORS> joint_interfaces_;
 
   // 当前状态缓存
-  std::array<double, NUM_FINGERS> last_position_cmds_;
-  std::array<double, NUM_FINGERS> current_position_states_;
-  std::array<double, NUM_FINGERS> current_velocity_states_;
-  std::array<double, NUM_FINGERS> current_effort_states_;
+  std::array<double, NUM_FINGER_MOTORS> last_position_cmds_;
+  std::array<double, NUM_FINGER_MOTORS> current_position_states_;
+  std::array<double, NUM_FINGER_MOTORS> current_velocity_states_;
+  std::array<double, NUM_FINGER_MOTORS> current_effort_states_;
+
+  // 手指马达状态缓存 (6个马达)
+  std::array<uint16_t, NUM_FINGER_MOTORS> finger_motor_status_;  // 马达状态值
+
+  // 触觉数据缓存 (Touch设备专用，共5个手指)
+  static constexpr size_t NUM_TOUCH_FINGERS = 5;
+  std::array<uint16_t, NUM_TOUCH_FINGERS> touch_normal_force_;      // 法向力 (0.01N精度)
+  std::array<uint16_t, NUM_TOUCH_FINGERS> touch_tangential_force_;  // 切向力 (0.01N精度)
+  std::array<uint16_t, NUM_TOUCH_FINGERS> touch_direction_;         // 方向角 (度)
+  std::array<uint32_t, NUM_TOUCH_FINGERS> touch_proximity_;         // 接近值
+  std::array<uint16_t, NUM_TOUCH_FINGERS> touch_status_;            // 状态值
   // 日志节流缓存
-  std::array<double, NUM_FINGERS> last_logged_positions_;
-  std::array<double, NUM_FINGERS> last_logged_velocities_;
-  std::array<double, NUM_FINGERS> last_logged_efforts_;
-  std::array<double, NUM_FINGERS> last_logged_cmd_pos_;
+  std::array<double, NUM_FINGER_MOTORS> last_logged_positions_;
+  std::array<double, NUM_FINGER_MOTORS> last_logged_velocities_;
+  std::array<double, NUM_FINGER_MOTORS> last_logged_efforts_;
+  std::array<double, NUM_FINGER_MOTORS> last_logged_cmd_pos_;
 
   // 控制逻辑状态
   uint8_t active_finger_id_;  // 当前正在控制的手指ID
   bool finger_control_busy_;  // 是否有手指正在运动中
 
   bool is_physical_mode_ = false;
+  bool is_touch_device_ = false;
 
   // 辅助函数
   void setupChannels();
@@ -118,6 +130,9 @@ private:
   // 单位转换
   double revo2ToRadian(int16_t revo2_pos);
   int16_t radianToRevo2(double radian_pos);
+
+  // 状态转换
+  const char * getMotorStatusString(uint16_t status);
 
   // 单位转换
   inline double degToRad(double deg) const { return deg * M_PI / 180.0; }

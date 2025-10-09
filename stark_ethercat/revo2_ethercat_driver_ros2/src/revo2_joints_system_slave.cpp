@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <rclcpp/rclcpp.hpp>
 #include <stark_ethercat_interface/ec_sdo_manager.hpp>
 #include "revo2_ethercat_plugins/execute_command.hpp"
 
@@ -21,7 +22,8 @@ Revo2JointsSystemSlave::Revo2JointsSystemSlave()
   ,
   active_finger_id_(0),
   finger_control_busy_(false),
-  is_physical_mode_(false)
+  is_physical_mode_(false),
+  is_touch_device_(false)
 {
   REVO2_LOG_INFO("Initializing Revo2 Joints System EtherCAT Slave Plugin");
   REVO2_LOG_INFO("build time: %s - %s", __DATE__, __TIME__);
@@ -37,6 +39,16 @@ Revo2JointsSystemSlave::Revo2JointsSystemSlave()
   last_logged_velocities_.fill(std::numeric_limits<double>::quiet_NaN());
   last_logged_efforts_.fill(std::numeric_limits<double>::quiet_NaN());
   last_logged_cmd_pos_.fill(std::numeric_limits<double>::quiet_NaN());
+
+  // 初始化马达状态数据
+  finger_motor_status_.fill(0);
+
+  // 初始化触觉数据
+  touch_normal_force_.fill(0);
+  touch_tangential_force_.fill(0);
+  touch_direction_.fill(0xFFFF);  // 0xFFFF表示方向无效
+  touch_proximity_.fill(0);
+  touch_status_.fill(0);
 }
 
 Revo2JointsSystemSlave::~Revo2JointsSystemSlave()
@@ -69,21 +81,7 @@ bool Revo2JointsSystemSlave::setupSlave(
     assign_activate_,
     (rxpdo_control_mode_ == MULTI_FINGER_MODE) ? "Multi-Finger" : "Single-Finger");
 
-  // 设置 PDO 通道（匹配从站固定PDO映射）
-  setupChannels();
-
-  // 设置同步管理器
-  setupSyncManagers();
-
-  // 设置域映射
-  setupDomainMapping();
-
-  // 设置ROS接口映射
-  setupInterfaceMapping();
-
-  // TODO get current_unit_mode_
-  // ethercat upload -t raw -p 0 0x8000 0x05
-
+  // 首先进行设备检测，确定设备类型
   try
   {
     std::string command;
@@ -91,10 +89,21 @@ bool Revo2JointsSystemSlave::setupSlave(
     // 读取固件版本
     command = "ethercat upload -t string -p 0 0x8000 0x11";
     output = ExecuteCommand::run(command);
-    REVO2_LOG_INFO("Run command: %s, Wrist FW version: %s", command.c_str(), output.c_str());
+    REVO2_LOG_INFO("Run command: %s, CTRL FW version: %s", command.c_str(), output.c_str());
     command = "ethercat upload -t string -p 0 0x8000 0x13";
     output = ExecuteCommand::run(command);
-    REVO2_LOG_INFO("Run command: %s, CTRL FW version: %s", command.c_str(), output.c_str());
+    REVO2_LOG_INFO("Run command: %s, Wrist FW version: %s", command.c_str(), output.c_str());
+
+    // 检测设备类型
+    command = "ethercat upload -t string -p 0 0x1008 0x00";
+    output = ExecuteCommand::run(command);
+    REVO2_LOG_INFO("Run command: %s, Device name: %s", command.c_str(), output.c_str());
+    // 去除前后空白和换行
+    output.erase(0, output.find_first_not_of(" \t\r\n"));
+    output.erase(output.find_last_not_of(" \t\r\n") + 1);
+    is_touch_device_ = (output.find("Touch") != std::string::npos);
+    REVO2_LOG_INFO("Device type detected: %s", is_touch_device_ ? "Touch" : "Pro");
+
     command = "ethercat upload -t raw -p 0 0x8000 0x05";
     output = ExecuteCommand::run(command);
     REVO2_LOG_INFO("Run command: %s, unit_mode: %s", command.c_str(), output.c_str());
@@ -117,8 +126,20 @@ bool Revo2JointsSystemSlave::setupSlave(
   }
   catch (const std::exception & e)
   {
-    REVO2_LOG_ERROR("Error: %s", e.what());
+    REVO2_LOG_ERROR("Error during device detection: %s", e.what());
   }
+
+  // 设备检测完成后，根据设备类型设置 PDO 通道
+  setupChannels();
+
+  // 设置同步管理器
+  setupSyncManagers();
+
+  // 设置域映射
+  setupDomainMapping();
+
+  // 设置ROS接口映射
+  setupInterfaceMapping();
 
   // 配置 SDO（上电后写入期望配置：unit_mode=1 物理量模式）
   sdo_config.clear();
@@ -173,7 +194,24 @@ void Revo2JointsSystemSlave::setupChannels()
   channels_.push_back({0x6000, 0x03, 96});  // finger_cur[6] (6×int16)
   channels_.push_back({0x6000, 0x04, 96});  // finger_status[6] (6×uint16)
 
-  REVO2_LOG_DEBUG("Configured %zu channels for Revo2 joints system", channels_.size());
+  // Touch设备额外的触觉数据 TxPDO条目11-15
+  if (is_touch_device_)
+  {
+    channels_.push_back({0x6010, 0x01, 80});   // force_normal[5] (5×uint16)
+    channels_.push_back({0x6010, 0x02, 80});   // force_tangential[5] (5×uint16)
+    channels_.push_back({0x6010, 0x03, 80});   // force_direction[5] (5×uint16)
+    channels_.push_back({0x6010, 0x04, 160});  // force_proximity[5] (5×uint32)
+    channels_.push_back({0x6010, 0x05, 80});   // force_status[5] (5×uint16)
+    REVO2_LOG_INFO("Added %zu touch channels for Touch device", 5);
+  }
+  else
+  {
+    REVO2_LOG_INFO("Standard device detected, no touch channels added");
+  }
+
+  REVO2_LOG_INFO(
+    "Configured %zu channels for Revo2 joints system (%s)", channels_.size(),
+    is_touch_device_ ? "Touch" : "Standard");
 }
 
 void Revo2JointsSystemSlave::setupSyncManagers()
@@ -186,9 +224,10 @@ void Revo2JointsSystemSlave::setupSyncManagers()
   rxpdo_.clear();
   rxpdo_.push_back({0x1600, 7, &channels_[0]});  // 7个条目：多指控制(3) + 单指控制(4)
 
-  // 构建 TxPDO (从站输入) - 4个96位状态数组
+  // 构建 TxPDO (从站输入) - 标准设备4个条目，Touch设备9个条目
   txpdo_.clear();
-  txpdo_.push_back({0x1A00, 4, &channels_[7]});  // 4个状态数组通道：位置、速度、电流、状态
+  uint8_t txpdo_entries = is_touch_device_ ? 9 : 4;
+  txpdo_.push_back({0x1A00, txpdo_entries, &channels_[7]});  // 状态数组通道：标准(4) + 触觉(5)
 
   // 同步管理器配置
   syncs_.push_back({0, EC_DIR_OUTPUT, 0, nullptr, EC_WD_DISABLE});
@@ -199,7 +238,9 @@ void Revo2JointsSystemSlave::setupSyncManagers()
     {3, EC_DIR_INPUT, static_cast<uint8_t>(txpdo_.size()), txpdo_.data(), EC_WD_DISABLE});
   syncs_.push_back({0xff, EC_DIR_INVALID, 0, nullptr, EC_WD_DISABLE});  // 结束标记
 
-  REVO2_LOG_DEBUG("Configured sync managers for Revo2 joints system");
+  REVO2_LOG_INFO(
+    "Configured sync managers for Revo2 joints system (%s, %d TxPDO entries)",
+    is_touch_device_ ? "Touch" : "Standard", txpdo_entries);
 }
 
 void Revo2JointsSystemSlave::setupDomainMapping()
@@ -228,7 +269,7 @@ void Revo2JointsSystemSlave::setupInterfaceMapping()
 
   // command interfaces [0-5] (6个关节的position), state interfaces [0-17] (6个关节×3个状态)
 
-  for (size_t i = 0; i < NUM_FINGERS; ++i)
+  for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
   {
     // Commands are flattened per joint: [j0_pos, j1_pos, ...]
     joint_interfaces_[i].position_cmd = static_cast<int>(i);
@@ -272,7 +313,7 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
       if (rxpdo_control_mode_ == MULTI_FINGER_MODE)
       {
         // 多指控制：从 command_interface 读取6个关节的目标，并写入按从站定义的编码
-        for (size_t i = 0; i < NUM_FINGERS; ++i)
+        for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
         {
           int cmd_idx = joint_interfaces_[i].position_cmd;
           int16_t raw_out = 0;
@@ -334,7 +375,7 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
       if (rxpdo_control_mode_ == MULTI_FINGER_MODE)
       {
         // 多指控制：写入每指运动时间
-        for (size_t i = 0; i < NUM_FINGERS; ++i)
+        for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
         {
           write_u16(domain_address + i * 2, ctrl_mode_param2_time_ms_);
         }
@@ -378,7 +419,7 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
     case 5:
       if (rxpdo_control_mode_ == SINGLE_FINGER_MODE)
       {
-        if (active_finger_id_ < NUM_FINGERS)
+        if (active_finger_id_ < NUM_FINGER_MOTORS)
         {
           int cmd_idx = joint_interfaces_[active_finger_id_].position_cmd;
           if (cmd_idx >= 0 && command_interface_ptr_)
@@ -455,7 +496,7 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
 
     // TxPDO 通道 7: finger_pos[6] (6×uint16)
     case 7:
-      for (size_t i = 0; i < NUM_FINGERS; ++i)
+      for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
       {
         uint16_t raw = read_u16(domain_address + i * 2);
         double radian_pos = 0.0;
@@ -490,7 +531,7 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
 
     // TxPDO 通道 8: finger_spd[6] (6×int16)
     case 8:
-      for (size_t i = 0; i < NUM_FINGERS; ++i)
+      for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
       {
         int16_t raw = read_s16(domain_address + i * 2);
         double radian_spd = 0.0;
@@ -526,7 +567,7 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
 
     // TxPDO 通道 9: finger_cur[6] (6×int16)
     case 9:
-      for (size_t i = 0; i < NUM_FINGERS; ++i)
+      for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
       {
         int16_t raw = read_s16(domain_address + i * 2);
         double effort = 0.0;
@@ -562,18 +603,139 @@ void Revo2JointsSystemSlave::processData(size_t index, uint8_t * domain_address)
       }
       break;
 
-    // TxPDO 通道 10: finger_status[6] (6×uint16) - 暂时不使用
+    // TxPDO 通道 10: finger_status[6] (6×uint16)
     case 10:
-      // 读取状态但不处理
+      // 读取6个马达的状态数据
+      for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
+      {
+        finger_motor_status_[i] = read_u16(domain_address + i * 2);
+      }
+
+      // // 每秒打印一次状态数据
+      // {
+      //   static auto clock = rclcpp::Clock();
+      //   RCLCPP_INFO_THROTTLE(
+      //     rclcpp::get_logger("revo2_motor"), clock, 1000,
+      //     "Motor Status - Thumb_Flex: %s | Thumb_Abduct: %s | Index: %s | "
+      //     "Middle: %s | Ring: %s | Pinky: %s",
+      //     getMotorStatusString(finger_motor_status_[0]),    // 拇指尖部
+      //     getMotorStatusString(finger_motor_status_[1]),    // 拇指根部
+      //     getMotorStatusString(finger_motor_status_[2]),    // 食指
+      //     getMotorStatusString(finger_motor_status_[3]),    // 中指
+      //     getMotorStatusString(finger_motor_status_[4]),    // 无名指
+      //     getMotorStatusString(finger_motor_status_[5]));   // 小指
+      // }
+      break;
+
+    // Touch版本专用的触觉数据通道 (11-15)
+    case 11:  // force_normal[5] (5×uint16)
+      if (is_touch_device_)
+      {
+        for (size_t i = 0; i < NUM_TOUCH_FINGERS; ++i)
+        {
+          touch_normal_force_[i] = read_u16(domain_address + i * 2);
+        }
+      }
+      break;
+
+    case 12:  // force_tangential[5] (5×uint16)
+      if (is_touch_device_)
+      {
+        for (size_t i = 0; i < NUM_TOUCH_FINGERS; ++i)
+        {
+          touch_tangential_force_[i] = read_u16(domain_address + i * 2);
+        }
+      }
+      break;
+
+    case 13:  // force_direction[5] (5×uint16)
+      if (is_touch_device_)
+      {
+        for (size_t i = 0; i < NUM_TOUCH_FINGERS; ++i)
+        {
+          touch_direction_[i] = read_u16(domain_address + i * 2);
+        }
+      }
+      break;
+
+    case 14:  // force_proximity[5] (5×uint32)
+      if (is_touch_device_)
+      {
+        for (size_t i = 0; i < NUM_TOUCH_FINGERS; ++i)
+        {
+          // 读取32位数据并进行大小端转换
+          // 读到两个16位寄存器: [high_word, low_word]
+          uint16_t high_word = read_u16(domain_address + i * 4);
+          uint16_t low_word = read_u16(domain_address + i * 4 + 2);
+          // 大端转小端: 0x4433,0x2211 -> 0x11223344
+          touch_proximity_[i] = (static_cast<uint32_t>(low_word) << 16) | high_word;
+        }
+      }
+      break;
+
+    case 15:  // force_status[5] (5×uint16)
+      if (is_touch_device_)
+      {
+        for (size_t i = 0; i < NUM_TOUCH_FINGERS; ++i)
+        {
+          touch_status_[i] = read_u16(domain_address + i * 2);
+        }
+
+        // 法向力，切向力是 16 位的无符号数据。数值单位是 100 * N， 例如切向力 1000 表示 1000 / 100
+        // N, 即 10 N。法向力，切向力的测量范围是 0 ~ 25 N。 切向力方向是 16
+        // 位的无符号数据。单位是角度，数值范围为 0 ~ 359 度。靠近指尖的方向为 0
+        // 度，按顺时针旋转最大到 359 度，当数值为 65535 (0xFFFF) 时，表示切向力方向无效。 接近值是
+        // 32 位的无符号数据。 触觉状态寄存器为 16 位，分高低字节表示不同状态信息： 低 8
+        // 位表示整体数据状态：0 表示数据正常，1 表示数据异常，2 表示与触觉传感器通信异常。 高 8
+        // 位为数据异常志位： Bit0 表示原始值错误， Bit1 表示原始值长时间未更新， Bit2
+        // 表示触发超时。
+
+        // 每 秒打印一次触觉数据
+        static auto clock = rclcpp::Clock();
+        RCLCPP_INFO_THROTTLE(
+          rclcpp::get_logger("revo2_touch"), clock, 30 * 1000,
+          "Touch Data - Finger0: N=%.2fN T=%.2fN D=%d° P=%u S=0x%02X %02X | "
+          "Finger1: N=%.2fN T=%.2fN D=%d° P=%u S=0x%02X %02X | "
+          "Finger2: N=%.2fN T=%.2fN D=%d° P=%u S=0x%02X %02X | "
+          "Finger3: N=%.2fN T=%.2fN D=%d° P=%u S=0x%02X %02X | "
+          "Finger4: N=%.2fN T=%.2fN D=%d° P=%u S=0x%02X %02X",
+          // Finger 0 (拇指)
+          touch_normal_force_[0] * 0.01, touch_tangential_force_[0] * 0.01,
+          touch_direction_[0] == 0xFFFF ? -1 : static_cast<int>(touch_direction_[0]),
+          touch_proximity_[0], touch_status_[0] >> 8, touch_status_[0] & 0xFF,
+          // Finger 1 (食指)
+          touch_normal_force_[1] * 0.01, touch_tangential_force_[1] * 0.01,
+          touch_direction_[1] == 0xFFFF ? -1 : static_cast<int>(touch_direction_[1]),
+          touch_proximity_[1], touch_status_[1] >> 8, touch_status_[1] & 0xFF,
+          // Finger 2 (中指)
+          touch_normal_force_[2] * 0.01, touch_tangential_force_[2] * 0.01,
+          touch_direction_[2] == 0xFFFF ? -1 : static_cast<int>(touch_direction_[2]),
+          touch_proximity_[2], touch_status_[2] >> 8, touch_status_[2] & 0xFF,
+          // Finger 3 (无名指)
+          touch_normal_force_[3] * 0.01, touch_tangential_force_[3] * 0.01,
+          touch_direction_[3] == 0xFFFF ? -1 : static_cast<int>(touch_direction_[3]),
+          touch_proximity_[3], touch_status_[3] >> 8, touch_status_[3] & 0xFF,
+          // Finger 4 (小指)
+          touch_normal_force_[4] * 0.01, touch_tangential_force_[4] * 0.01,
+          touch_direction_[4] == 0xFFFF ? -1 : static_cast<int>(touch_direction_[4]),
+          touch_proximity_[4], touch_status_[4] >> 8, touch_status_[4] & 0xFF);
+      }
       break;
 
     default:
-      REVO2_LOG_WARN("Unknown PDO channel index: %zu", index);
+      if (index >= 11 && index <= 15 && !is_touch_device_)
+      {
+        REVO2_LOG_WARN("Received touch data on non-touch device, channel index: %zu", index);
+      }
+      else
+      {
+        REVO2_LOG_WARN("Unknown PDO channel index: %zu", index);
+      }
       break;
   }
 }
 
-// 简单的轮询逻辑：检查哪个手指的命令发生了变化
+// 检查哪个手指的命令发生了变化
 void Revo2JointsSystemSlave::updateActiveFingerFromCommands()
 {
   static size_t last_updated_finger = 0;
@@ -587,9 +749,9 @@ void Revo2JointsSystemSlave::updateActiveFingerFromCommands()
   }
 
   // 轮询检查每个手指的命令是否有变化
-  for (size_t i = 0; i < NUM_FINGERS; ++i)
+  for (size_t i = 0; i < NUM_FINGER_MOTORS; ++i)
   {
-    size_t finger_idx = (last_updated_finger + i) % NUM_FINGERS;
+    size_t finger_idx = (last_updated_finger + i) % NUM_FINGER_MOTORS;
     int cmd_idx = joint_interfaces_[finger_idx].position_cmd;
 
     if (
@@ -624,6 +786,23 @@ int16_t Revo2JointsSystemSlave::radianToRevo2(double radian_pos)
   // XXX 弧度与千分比线性映射
   double scaled = 1 + ((radian_pos - 0.001) * (1000 - 1) / (1.57 - 0.001));
   return static_cast<int16_t>(std::round(std::clamp(scaled, 1.0, 1000.0)));
+}
+
+const char * Revo2JointsSystemSlave::getMotorStatusString(uint16_t status)
+{
+  switch (status)
+  {
+    case 0:
+      return "IDLE";  // 马达空闲
+    case 1:
+      return "RUNNING";  // 马达运行
+    case 2:
+      return "STALLED";  // 马达堵转
+    case 3:
+      return "TURBO";  // Turbo模式
+    default:
+      return "UNKNOWN";  // 未知状态
+  }
 }
 
 const ec_sync_info_t * Revo2JointsSystemSlave::syncs() { return syncs_.data(); }

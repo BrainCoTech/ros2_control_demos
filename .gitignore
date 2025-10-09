@@ -4,3 +4,4 @@ install/
 dist/
 VERSION
 logs/
+stark_ethercat/compile_commands.json
